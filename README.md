@@ -1,4 +1,4 @@
-# Schweizer Kartengenerator – Version 2.0
+# Schweizer Kartengenerator – Version 2.2
 
 Statische Webanwendung für **GitHub Pages**, ohne Backend, von Reto Speerli. Drei Betriebsarten: Landeskarte, SWISSIMAGE-Luftbild, Höhenlinien für Graukarton-Schichtreliefs. Zusätzliche Farbmaske für **politische Gemeinden oder Kantone**.
 
@@ -35,6 +35,12 @@ A0 bei 508 dpi bedeutet ungefähr **400 Millionen Ausgabepixel** (je nach Rand).
 
 Für lokale Nutzung kann man die Original-GeoTIFFs selbst herunterladen und im Exportbereich per Mehrfachauswahl hinzufügen. Diese Dateien müssen in **EPSG:2056** georeferenziert sein. Die App verwirft nicht passende oder unvollständige Quellen, statt leere Flächen als fertige Karten auszugeben.
 
+## Korrektur Version 2.2 – Gemeindesuche
+
+Die Gemeindesuche prüft `SearchServer?origins=gg25` und verwirft gültige Treffer nicht mehr, wenn das optionale Feld `layerBodId` fehlt. Liefert die Ortssuche keine verwertbare Feature-ID, verwendet sie zusätzlich den offiziellen `MapServer/find`-Dienst mit `searchField=gemname`. Historische Gemeinden werden nach Möglichkeit anhand `is_current_jahr` ausgeschlossen. Der Testfall **Wädenswil (ZH)** ist als automatisierter Regressionstest hinterlegt (simulierte API-Antworten). Live-Anfragen konnten in dieser Umgebung nicht geprüft werden.
+
+Bei GitHub Pages nach Austausch der Dateien einmal mit **Strg+F5** aktualisieren. Die Modul-URLs enthalten einen Versionsparameter zur Cache-Aktualisierung.
+
 ## Politische Gemeinde / Kanton in Farbe
 
 Unter «Gebiet farbig hervorheben» auswählen:
@@ -49,6 +55,18 @@ Die App lädt danach die **Originalpolygon-Geometrie** von **swissBOUNDARIES3D**
 ## Höhenlinien / Graukarton
 
 Vorhandener Modus aus Version 1.0: swissALTI³D mit 2-m-COG-Höhenraster oder lokalen LV95-GeoTIFFs, Äquidistanz und Abtastung wählbar, Export als Vektor-PDF, SVG und ein SVG pro Höhenstufe im ZIP. **Die SVGs sind Linienvorlagen, noch keine automatisch geschlossenen Ausschnittflächen**. Die farbige Gemeinde-/Kantonsmaske gilt nicht für den Höhenlinienmodus.
+
+## Korrektur Version 2.2 – 165 Höhenkacheln bei A2 hoch / 1:25’000
+
+Der Abbruch bei 160 Kacheln war eine **willkürliche Anwendungsschranke**, keine Grenze des Browsers oder von swisstopo. Sie ist entfernt. Ein A2-Blatt (5 mm Rand) bei 1:25’000 umfasst 10,25 × 14,60 km, im Beispiel um 2’692’322 / 1’228’496 sind es 165 Stück swissALTI³D-COGs mit 2 m Quelldaten. Die Höhenlinien können weiterhin aus den originalen 2-m-Quellen und dem gewählten Ausgangsraster (z. B. 10 m) abgeleitet werden.
+
+- Quellen nacheinander laden und unmittelbar in das Zielraster integrieren; keine 165 kompletten Rasterkacheln gleichzeitig im Speicher halten.
+- Bis zu zwei zusätzliche Versuche pro fehlgeschlagene Quelle; klare Fortschrittsanzeige und jederzeit Abbruch über **Vorgang abbrechen**.
+- Kleine geometrische Korrektur: Die Rasterprobe liegt nun exakt innerhalb der Druckfläche, einschliesslich des rechten und unteren Blattrands. Keine künstliche Lücke durch Aufrundung auf den nächsten vollen Rasterabstand.
+- Bei echter unvollständiger Abdeckung wird **kein** Höhenlinienexport erzeugt. Die Meldung nennt fehlende Rasterwerte und die zuerst ausgefallenen Quellen.
+- Die erwartete Kachelzahl und die grobe Datenmenge werden angezeigt. Gemäss swisstopo liegt eine 2-m-COG-Datei typischerweise bei etwa 1 MB; der reale HTTP-Transfer hängt vom COG-Zugriff ab.
+
+Die App ist statisch für GitHub Pages. Der Vollabruf echter swisstopo-Quellen wurde in dieser Entwicklungsumgebung nicht end-to-end überprüft. Der 165-Kachel-Test verwendet simulierte STAC- und GeoTIFF-Antworten, prüft aber die komplette Datenpipeline bis zur vollständigen Rasterabdeckung.
 
 ## Verwendete Daten und APIs
 

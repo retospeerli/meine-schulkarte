@@ -3,6 +3,7 @@ import {toPaper} from './core.mjs';
 
 export function computeContours(grid,interval,{maxLevels=350,maxSegments=550000}={}) {
   const {values,nx,ny,step,bounds}=grid;
+  const stepX=grid.stepX??step,stepY=grid.stepY??step;
   if(!(nx>=2&&ny>=2&&values.length===nx*ny))throw new Error('Ungültiges Höhenraster');
   if(!(interval>0&&Number.isFinite(interval)))throw new Error('Ungültige Äquidistanz');
   let zMin=Infinity,zMax=-Infinity;
@@ -21,7 +22,7 @@ export function computeContours(grid,interval,{maxLevels=350,maxSegments=550000}
       const t=Math.min(1,Math.max(0,(h-v[ab[0]])/(v[ab[1]]-v[ab[0]])));
       const xx=xs[ab[0]]+(xs[ab[1]]-xs[ab[0]])*t, yy=ys[ab[0]]+(ys[ab[1]]-ys[ab[0]])*t;
       const key= id===0?`h:${row}:${col}`:id===1?`v:${row}:${col+1}`:id===2?`h:${row+1}:${col}`:`v:${row}:${col}`;
-      return node(key,bounds.minE+xx*step,bounds.maxN-yy*step);
+      return node(key,bounds.minE+xx*stepX,bounds.maxN-yy*stepY);
     }
     function link(a,b){a.links.add(b.k);b.links.add(a.k);segments++;totalSegments++;if(totalSegments>maxSegments)throw new Error('Zu viele Höhenliniensegmente. Höhenraster gröber oder Gebiet kleiner wählen.');}
     for(let row=0;row<ny-1;row++) for(let col=0;col<nx-1;col++){

@@ -1,8 +1,8 @@
 import {PAPER,SOURCES,RESOLUTIONS,layout,tilePlan,resolutionZoom,tileSpan,enumerateTiles,tileUrl,toPaper} from './core.mjs';
-import {getHeightGrid,newHeightGrid} from './heights.mjs';
+import {getHeightGrid,newHeightGrid,estimatedHeightTileCount} from './heights.mjs';
 import {computeContours,svgForContours} from './contours.mjs';
 import {choosePrintProduct,expectedNativeDpi,printPixels} from './printdata.mjs';
-import {CANTONS,searchRegions,getRegionGeometry,fitRegion,applyGeometryPath} from './regions.mjs';
+import {CANTONS,searchRegions,getRegionGeometry,fitRegion,applyGeometryPath} from './regions.mjs?v=2.2';
 import {createOriginalRasterPdf} from './rasterexport.mjs';
 
 const $=id=>document.getElementById(id);
@@ -119,7 +119,7 @@ function draw(){
   $('detailText').textContent=`Zentrum: ${format(l.e)} / ${format(l.n)} · ${n}`;
   $('paperText').textContent=`${cfg().paper} ${cfg().orientation==='quer'?'quer':'hoch'} · 1:${format(l.scale)}`;
   if(mode==='kontur'){
-    try{let h=newHeightGrid(l.b,Number($('sampling').value));$('tileText').textContent=`Raster: ${format(h.nx)} × ${format(h.ny)} · ${format(h.nx*h.ny)} Werte`;}
+    try{let h=newHeightGrid(l.b,Number($('sampling').value));$('tileText').textContent=`Raster: ${format(h.nx)} × ${format(h.ny)} · ${format(h.nx*h.ny)} Werte · ca. ${format(estimatedHeightTileCount(l.b))} Höhenkacheln (2 m)`;}
     catch(e){$('tileText').textContent=e.message;}
     $('quality').textContent=`Vektor-PDF und SVG: exakt 1:${format(l.scale)} bei 100 % Druck. Höhenraster aus swissALTI³D (2 m Quelldaten).`;
   }else{
@@ -222,7 +222,7 @@ async function prepareContours(signal){
   if(!(interval>=1&&interval<=1000))throw new Error('Äquidistanz muss zwischen 1 und 1 000 m liegen.');
   if(step<2||step>50)throw new Error('Rasterprobe muss 2 bis 50 m betragen.');
   const files=[...$('heightFiles').files];
-  const grid=await getHeightGrid(l.b,step,{files,onProgress:s=>status(s),signal,assetLimit:160});
+  const grid=await getHeightGrid(l.b,step,{files,onProgress:s=>status(s),signal,retries:2});
   if(signal.aborted)throw abortErr();
   status('Berechne Höhenlinien (Marching Squares) …');
   const result=computeContours(grid,interval);
@@ -349,14 +349,14 @@ async function findMunicipality(){
   $('regionStatus').textContent=`Suche politische Gemeinde «${q}» …`;$('regionResults').hidden=true;
   try{
     const matches=await searchRegions(q,'gemeinde');
-    if(!matches.length){$('regionStatus').textContent='Keine politische Gemeinde gefunden.';return;}
+    if(!matches.length){$('regionStatus').textContent=`Keine politische Gemeinde zu «${q}» gefunden (beide swisstopo-Suchwege geprüft).`;return;}
     const target=$('regionResults');target.replaceChildren();
     for(const record of matches){
       const b=document.createElement('button');b.textContent=record.name;
       b.addEventListener('click',()=>assignRegion(record,'gemeinde'));target.appendChild(b);
     }
     target.hidden=false;$('regionStatus').textContent=`${matches.length} Treffer – eine Gemeinde auswählen.`;
-  }catch(e){status('Gemeindesuche fehlgeschlagen: '+errorText(e),'error');}
+  }catch(e){$('regionStatus').textContent='Gemeindesuche fehlgeschlagen: '+errorText(e);status('Gemeindesuche fehlgeschlagen: '+errorText(e),'error');}
 }
 $('findMunicipality').addEventListener('click',findMunicipality);
 $('municipalitySearch').addEventListener('keydown',e=>{if(e.key==='Enter')findMunicipality();});
