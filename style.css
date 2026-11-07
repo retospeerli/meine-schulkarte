@@ -2,3 +2,9 @@
 [hidden]{display:none!important}
 
 .checkline{display:flex;gap:9px;align-items:center;line-height:1.5}.checkline input{display:inline-block;flex:0 0 auto;margin:0;width:17px;height:17px}.settings #regionStatus{font-size:11.5px;line-height:1.6}
+
+/* Stand der kartografischen Serienauswahl */
+.scale-warning {color:#865216!important;font-weight:600;}
+
+/* Optionale Büchlein-Ausgabe im Höhenlinienmodus */
+.contour-book-option{margin-top:18px!important;color:#33465f;font-weight:650;align-items:flex-start}.contour-book-option input{margin-top:2px}
