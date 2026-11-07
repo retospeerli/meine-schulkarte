@@ -11,12 +11,14 @@ test('508 dpi A4 has 20 pixels/mm of inner map, exact 1:25k',()=>{
  assert.equal(expectedNativeDpi(25000,1.25),508);
  assert.equal(px.blocks,12*8);
 });
-test('source picks the largest map scale not coarser than output',()=>{
- assert.equal(choosePrintProduct(15000).scale,10000);
+test('nächstgeeignete amtliche Kartenserie, gut lesbare Generalisierung bei Zwischenmassstäben',()=>{
+ assert.equal(choosePrintProduct(15000).scale,25000);
  assert.equal(choosePrintProduct(25000).scale,25000);
- assert.equal(choosePrintProduct(40000).scale,25000);
+ assert.equal(choosePrintProduct(40000).scale,50000);
+ assert.equal(choosePrintProduct(55000).scale,50000);
+ assert.equal(choosePrintProduct(75000).scale,100000);
  assert.equal(choosePrintProduct(250000).scale,200000);
- assert.equal(choosePrintProduct(1000000).scale,500000);
+ assert.equal(choosePrintProduct(1000000).scale,1000000);
  assert.equal(choosePrintProduct(25000,'luftbild').expectedGsd,.1);
 });
 test('STAC only original KREL TIFF, never grey or JPEG preview',()=>{
