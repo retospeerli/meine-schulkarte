@@ -1,4 +1,4 @@
-import {stacBbox} from './core.mjs';
+import {stacBbox} from './core.mjs?v=2.7';
 const STAC='https://data.geo.admin.ch/api/stac/v1/collections/ch.swisstopo.swissalti3d/items';
 
 export function estimatedHeightTileCount(bounds){

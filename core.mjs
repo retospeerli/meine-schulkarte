@@ -1,4 +1,5 @@
 /** Print and WMTS math in Swiss LV95 (metres). No network dependencies. */
+import {cartographyForScale} from './cartography.mjs?v=2.7';
 export const PAPER = Object.freeze({
   A5:[148,210], A4:[210,297], A3:[297,420],
   A2:[420,594], A1:[594,841], A0:[841,1189]
@@ -10,8 +11,8 @@ export const RESOLUTIONS=Object.freeze([
   1000,750,650,500,250,100,50,20,10,5,2.5,2,/*24 unavailable*/null,1,.5,.25,.1
 ]);
 export const SOURCES = Object.freeze({
-  karte: {id:'ch.swisstopo.pixelkarte-farbe',label:'Landeskarte (farbig)',ext:'jpeg',lastZoom:23},
-  grau: {id:'ch.swisstopo.pixelkarte-grau',label:'Landeskarte (grau)',ext:'jpeg',lastZoom:23},
+  karte: {id:'ch.swisstopo.pixelkarte-farbe-pk25.noscale',label:'Landeskarte (farbig)',ext:'jpeg',lastZoom:23},
+  grau: {id:'ch.swisstopo.pixelkarte-farbe-pk25.noscale',label:'Landeskarte (grau)',ext:'jpeg',lastZoom:23},
   luftbild: {id:'ch.swisstopo.swissimage',label:'SWISSIMAGE Luftbild',ext:'jpeg',lastZoom:28}
 });
 export function dimensions(paper='A4',orientation='quer') {
@@ -50,14 +51,18 @@ export function enumerateTiles(bounds,z) {
   for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) arr.push({x,y,z,minE:e0+x*s,maxN:n0-y*s});
   return arr;
 }
-export function tileUrl(source,z,x,y) {
+export function tileUrl(source,z,x,y,scale) {
   const s=SOURCES[source];if(!s)throw new Error('Unbekannte Kartenquelle');
-  return `https://wmts.geo.admin.ch/1.0.0/${s.id}/default/current/2056/${z}/${x}/${y}.${s.ext}`;
+  // Explicit per-scale WMTS layer; the catch-all layer silently changes style on zoom.
+  const id=(source==='karte'||source==='grau')?cartographyForScale(scale).wmts:s.id;
+  return `https://wmts.geo.admin.ch/1.0.0/${id}/default/current/2056/${z}/${x}/${y}.${s.ext}`;
 }
 export function tilePlan(config) {
-  const l=layout(config), z=resolutionZoom(l.targetResolution,config.source);
+  const l=layout(config);
+  const style=(config.source==='karte'||config.source==='grau')?cartographyForScale(l.scale):null;
+  const z=resolutionZoom(l.targetResolution,config.source);
   const tiles=enumerateTiles(l.b,z),r=RESOLUTIONS[z];
-  return {...l,z,resolution:r,actualDpi:config.scale*0.0254/r,tiles};
+  return {...l,z,resolution:r,actualDpi:config.scale*0.0254/r,tiles,style};
 }
 export function toPaper(l,e,n) {
   return [l.margin+(e-l.b.minE)*1000/l.scale, l.margin+(l.b.maxN-n)*1000/l.scale];

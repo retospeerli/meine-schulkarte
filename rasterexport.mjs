@@ -1,6 +1,7 @@
-import {toPaper} from './core.mjs';
-import {choosePrintProduct,discoverPrintAssets,printPixels,expectedNativeDpi,verifyTileCoverage} from './printdata.mjs';
-import {applyGeometryPath} from './regions.mjs';
+import {toPaper} from './core.mjs?v=2.7';
+import {choosePrintProduct,discoverPrintAssets,printPixels,expectedNativeDpi,verifyTileCoverage} from './printdata.mjs?v=2.7';
+import {applyGeometryPath,highlightParts} from './regions.mjs?v=2.7';
+const MASK_LIGHTEN_ALPHA=.26;
 
 function intersection(a,b){
   const minE=Math.max(a.minE,b.minE),maxE=Math.min(a.maxE,b.maxE);
@@ -51,18 +52,24 @@ export function colourizeBlock(raw,w,h,region,l,total,x0,y0,mode){
   const out=createCanvas(w,h),ctx=out.getContext('2d');
   ctx.filter='grayscale(1)';ctx.drawImage(raw,0,0);ctx.filter='none';
   if(region&&mode!=='grau'){
-    ctx.save();
-    applyGeometryPath(ctx,region.geometry,(e,n)=>transformToBlock(l,total,x0,y0,e,n));
-    ctx.clip('evenodd');ctx.drawImage(raw,0,0);ctx.restore();
+    ctx.fillStyle=`rgba(255,255,255,${MASK_LIGHTEN_ALPHA})`;
+    ctx.fillRect(0,0,w,h);
+    // Union the highlighted shapes by rendering separate clips, avoiding
+    // evenodd cancellation where a lake overlaps the municipal polygon.
+    for(const geometry of highlightParts(region)){
+      ctx.save();
+      applyGeometryPath(ctx,geometry,(e,n)=>transformToBlock(l,total,x0,y0,e,n));
+      ctx.clip('evenodd');ctx.drawImage(raw,0,0);ctx.restore();
+    }
   }
   return out;
 }
 /** Open TIFFs by Range requests, then draw and embed one page at 508 dpi in 512x512 chunks. */
-export async function createOriginalRasterPdf(l,mode,region,localFiles,{signal,onProgress=()=>{},freshPdf,addAttribution,maxSources=1000}={}){
+export async function createOriginalRasterPdf(l,mode,region,localFiles,{signal,onProgress=()=>{},freshPdf,addAttribution,maxSources=12000,streamPdf=null}={}){
   if(!globalThis.GeoTIFF?.fromUrl)throw new Error('GeoTIFF.js nicht geladen. Internet/CDN prüfen.');
-  if(!globalThis.jspdf?.jsPDF)throw new Error('PDF-Bibliothek nicht geladen.');
+  if(!streamPdf&&!globalThis.jspdf?.jsPDF)throw new Error('PDF-Bibliothek nicht geladen.');
   const total=printPixels(l);
-  if(total.blocks>2400)throw new Error(`${total.blocks} PDF-Bildblöcke. Maximale Browsergrenze 2400; DPI oder Druckformat reduzieren.`);
+  if(total.blocks>12000)throw new Error(`${total.blocks} Druckbildblöcke übersteigen die begrenzte Browserkapazität. Druckmassstab oder DPI anpassen.`);
   onProgress(`Druckraster: ${total.width.toLocaleString('de-CH')} × ${total.height.toLocaleString('de-CH')} Pixel (${l.dpi} dpi) …`);
   let assets,product=choosePrintProduct(l.scale,mode);
   if(localFiles.length){
@@ -85,14 +92,46 @@ export async function createOriginalRasterPdf(l,mode,region,localFiles,{signal,o
   let nativeDpi=Infinity;
   const openAsset=async asset=>{
     if(signal?.aborted)throw new DOMException('Abgebrochen','AbortError');
-    const tif=asset.file?await GeoTIFF.fromBlob(asset.file):await GeoTIFF.fromUrl(asset.href,{allowFullFile:false});
-    const image=await tif.getImage(),bb=image.getBoundingBox();
-    if(!bb?.every(Number.isFinite)||bb[0]<1800000||bb[2]>3300000||bb[1]<700000||bb[3]>1700000)
+    const tif=asset.file?await GeoTIFF.fromBlob(asset.file):await GeoTIFF.fromUrl(asset.href,{allowFullFile:false,blockSize:32768,cacheSize:64,maxRanges:0});
+    const original=await tif.getImage(),nativeBounds=original.getBoundingBox();
+    if(!nativeBounds?.every(Number.isFinite)||nativeBounds[0]<1800000||nativeBounds[2]>3300000||nativeBounds[1]<700000||nativeBounds[3]>1700000)
       throw new Error('GeoTIFF muss in CH1903+/LV95 (EPSG:2056) georeferenziert sein.');
-    const nativeX=(bb[2]-bb[0])/image.getWidth(),nativeY=(bb[3]-bb[1])/image.getHeight();
+    const nativeX=(nativeBounds[2]-nativeBounds[0])/original.getWidth();
+    const nativeY=(nativeBounds[3]-nativeBounds[1])/original.getHeight();
     if(nativeX<=0||nativeY<=0)throw new Error('GeoTIFF besitzt ungültige Pixelauflösung.');
+    // A user-supplied TIFF may depict the *wrong* national map series.
+    // Check native 508dpi swisstopo pixel spacing (e.g. SMR25 = 1.25m).
+    // Unlike output PDF dpi, this validates the underlying cartography.
+    if(mode==='karte'||mode==='grau'){
+      const expected=product.scale/20000;
+      if(Math.abs(nativeX/expected-1)>.06 || Math.abs(nativeY/expected-1)>.06)
+        throw new Error(`Die GeoTIFF-Quelle hat ${nativeX.toFixed(3)} × ${nativeY.toFixed(3)} m/Pixel, erwartet werden ca. ${expected} m/Pixel für Landeskarte 1:${product.scale.toLocaleString('de-CH')}. Keine fremde Kartenserie als normgerechten Druck ausgeben.`);
+    }
     nativeDpi=Math.min(nativeDpi,expectedNativeDpi(l.scale,Math.max(nativeX,nativeY)));
-    return {image,tif,bb,bounds:sourceBounds(bb),nativeX,nativeY,asset};
+    // Read through the COG's internal overviews. At A0/1:10k, a 0.1-m
+    // original should be decoded through the ~0.4-m overview (if provided),
+    // not by expanding ~25 times more native pixels than the page needs.
+    let image=original,bb=nativeBounds,sourceGsd=Math.max(nativeX,nativeY);
+    const requiredGsd=l.scale*.0254/l.dpi;
+    if(mode==='luftbild'&&sourceGsd<requiredGsd*.7){
+      try{
+        const count=Math.min(await tif.getImageCount(),16);
+        for(let j=1;j<count;j++){
+          const candidate=await tif.getImage(j);
+          if(candidate.getWidth()>=image.getWidth()||candidate.getHeight()>=image.getHeight())continue;
+          let candidateBbox;
+          try{candidateBbox=candidate.getBoundingBox();}catch{continue;}
+          if(!candidateBbox?.every(Number.isFinite))continue;
+          const pixel=Math.max((candidateBbox[2]-candidateBbox[0])/candidate.getWidth(),
+            (candidateBbox[3]-candidateBbox[1])/candidate.getHeight());
+          if(pixel<=sourceGsd||pixel>requiredGsd*1.01)continue;
+          if(candidateBbox.some((v,k)=>Math.abs(v-nativeBounds[k])>Math.max(1,pixel*2)))continue;
+          if((candidate.fileDirectory?.SamplesPerPixel??3)<3)continue;
+          image=candidate;bb=candidateBbox;sourceGsd=pixel;
+        }
+      }catch(e){console.warn('COG-Übersichten nicht verfügbar; Originalauflösung wird verwendet:',e);}
+    }
+    return {image,tif,bb,bounds:sourceBounds(bb),nativeX,nativeY,sourceGsd,asset};
   };
   try{
     if(!lazy)for(let i=0;i<assets.length;i++){
@@ -103,7 +142,7 @@ export async function createOriginalRasterPdf(l,mode,region,localFiles,{signal,o
     if(!lazy&&!opened.length)throw new Error('Keine Druckquellen geladen.');
     if(lazy)onProgress(`${assets.length} Orthofoto-Kacheln entdeckt. Sie werden platzsparend bei Bedarf geöffnet.`);
     else onProgress(`${product.description}: Originalauflösung mindestens ca. ${Math.round(nativeDpi)} effektive dpi, PDF ${l.dpi} dpi.`);
-    const pdf=freshPdf(l);
+    const pdf=streamPdf||freshPdf(l);
     const chunk=512;
     const xs=Math.ceil(total.width/chunk),ys=Math.ceil(total.height/chunk);
     let count=0;
@@ -126,7 +165,7 @@ export async function createOriginalRasterPdf(l,mode,region,localFiles,{signal,o
           }
           if(intersection(entry.bounds,rect))sources.push(entry);
         }
-        while(active.size>48){const [first,entry]=active.entries().next().value;active.delete(first);entry.tif.close?.();}
+        while(active.size>14){const [first,entry]=active.entries().next().value;active.delete(first);entry.tif.close?.();}
       }else sources=opened.filter(s=>intersection(s.bounds,rect));
       if(!verifyTileCoverage(rect,sources.map(s=>s.bb)))
         throw new Error(`Originalkarten nicht lückenlos: Block ${ix+1}/${xs}, ${iy+1}/${ys}. Keine unvollständige PDF ausgegeben.`);
@@ -143,16 +182,18 @@ export async function createOriginalRasterPdf(l,mode,region,localFiles,{signal,o
       const pdfX=l.margin+x0/total.width*l.innerW;
       const pdfY=l.margin+y0/total.height*l.innerH;
       const pdfW=w/total.width*l.innerW,pdfH=h/total.height*l.innerH;
-      // Lossless map graphics, high-quality photographic JPEG; no upscaled WMTS source.
-      if(mode==='luftbild')pdf.addImage(out.toDataURL('image/jpeg',.98),'JPEG',pdfX,pdfY,pdfW,pdfH,undefined,'NONE');
+      // Stream the JPEG block to disk immediately: no full A0 PDF in memory.
+      if(streamPdf){
+        await streamPdf.imageCanvas(out,{xMm:pdfX,yMm:pdfY,widthMm:pdfW,heightMm:pdfH},{quality:.98});
+      }else if(mode==='luftbild')pdf.addImage(out.toDataURL('image/jpeg',.98),'JPEG',pdfX,pdfY,pdfW,pdfH,undefined,'NONE');
       else pdf.addImage(out.toDataURL('image/png'),'PNG',pdfX,pdfY,pdfW,pdfH);
       count++;
       if(count%4===0||count===total.blocks){
-        onProgress(`508-dpi-Originaldruck: ${count}/${total.blocks} Blöcke · Quelle ca. ${Math.round(nativeDpi)} dpi · ${product.description}`);
+        onProgress(`${l.dpi}-dpi-Originaldruck: ${count}/${total.blocks} Blöcke · Quelle ca. ${Math.round(nativeDpi)} dpi · ${product.description}`);
         await new Promise(resolve=>setTimeout(resolve,0));
       }
     }
-    addAttribution(pdf,l);
+    if(!streamPdf)addAttribution(pdf,l);
     return {pdf,product,nativeDpi,blocks:total.blocks};
   }finally{for(const entry of [...opened,...active.values()])try{entry.tif.close?.();}catch{}}
 }

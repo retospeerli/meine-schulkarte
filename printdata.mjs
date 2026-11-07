@@ -1,20 +1,13 @@
 /** Official high-resolution swisstopo STAC GeoTIFF product discovery, EPSG:2056. */
-import {stacBbox} from './core.mjs';
+import {stacBbox} from './core.mjs?v=2.7';
+import {cartographyForScale,OFFICIAL_MAP_SERIES} from './cartography.mjs?v=2.7';
 
-export const MAP_SERIES = Object.freeze([
-  {scale:10000,collection:'ch.swisstopo.landeskarte-farbe-10'},
-  {scale:25000,collection:'ch.swisstopo.pixelkarte-farbe-pk25.noscale'},
-  {scale:50000,collection:'ch.swisstopo.pixelkarte-farbe-pk50.noscale'},
-  {scale:100000,collection:'ch.swisstopo.pixelkarte-farbe-pk100.noscale'},
-  {scale:200000,collection:'ch.swisstopo.pixelkarte-farbe-pk200.noscale'},
-  {scale:500000,collection:'ch.swisstopo.pixelkarte-farbe-pk500.noscale'}
-]);
+export const MAP_SERIES=OFFICIAL_MAP_SERIES;
 export const ORTHO_COLLECTION='ch.swisstopo.swissimage-dop10';
 export function choosePrintProduct(scale,mode='karte'){
   if(mode==='luftbild')return {collection:ORTHO_COLLECTION,scale:null,expectedGsd:.1,description:'SWISSIMAGE Orthofoto (10 cm / regional 25 cm)'};
-  let selection=MAP_SERIES[0];
-  for(const series of MAP_SERIES)if(series.scale<=Number(scale))selection=series;
-  return {...selection,expectedGsd:selection.scale/20000,description:`Swiss Map Raster 1:${selection.scale.toLocaleString('de-CH')} (508 dpi in Originalgrösse)`};
+  const chosen=cartographyForScale(scale);
+  return {...chosen,expectedGsd:chosen.scale/20000,description:`Swiss Map Raster 1:${chosen.scale.toLocaleString('de-CH')} (508 dpi im Nennmassstab)`};
 }
 export function expectedNativeDpi(scale,sourceGsd){return Number(scale)*.0254/sourceGsd;}
 export function selectPrintAssets(features,{mode='karte',collection='',preferMeters=.1}={}){
@@ -32,14 +25,15 @@ export function selectPrintAssets(features,{mode='karte',collection='',preferMet
         const m=path.match(/(?:^|[_-])(0\.1|0\.25|2)(?=[_.-])/);
         const gsd=Number(a.gsd||m?.[1]);
         if(![.1,.25,2].includes(gsd))continue;
-        const key=path.replace(/([-_])20\d{2}(?=[_-])/,'$1YEAR')
+        const tile=path.match(/[_-](\d{4})-(\d{4})_(?:0\.1|0\.25|2)_2056/i);
+        const key=tile?`${tile[1]}-${tile[2]}`:path.replace(/([-_])20\d{2}(?=[_-])/,'$1YEAR')
           .replace(/([-_])(?:0\.1|0\.25|2)(?=[_.-])/,'$1GSD');
         all.push({href,year,gsd,key,itemId:item.id});
       }else{
         // Only KREL is the relief-bearing coloured Swiss Map print sheet.
         if(!/(?:^|[_-])krel(?:[_\-.]|$)/i.test(lower))continue;
         if(/preview|thumbnail|overview/i.test(lower))continue;
-        const gsd=Number(a.gsd||path.match(/(?:_|-)(0\.5|1\.25|2\.5|5|10|25)(?=\.tiff?$)/)?.[1]);
+        const gsd=Number(a.gsd||path.match(/(?:_|-)(0\.5|1\.25|2\.5|5|10|25|50)(?=\.tiff?$)/)?.[1]);
         const key=path.replace(/([-_])20\d{2}(?=[_-])/,'$1YEAR');
         all.push({href,year,gsd,key,itemId:item.id});
       }
@@ -48,8 +42,16 @@ export function selectPrintAssets(features,{mode='karte',collection='',preferMet
   const chosen=new Map();
   for(const a of all){
     const current=chosen.get(a.key);
-    if(!current || (mode==='luftbild'&&a.gsd<current.gsd) ||
-      (a.gsd===current.gsd&&a.year>current.year) || (mode!=='luftbild'&&a.year>current.year)) chosen.set(a.key,a);
+    // At A0/1:50'000 the 2-m source already exceeds 508 dpi.
+    // Selecting a 10-cm COG there would multiply network/decoding costs
+    // without adding a single printable detail.
+    const usable=a.gsd<=preferMeters+1e-8;
+    const currentUsable=current?.gsd<=preferMeters+1e-8;
+    const betterOrtho=mode==='luftbild'&&(!current ||
+      (usable&&!currentUsable) ||
+      (usable===currentUsable && (usable?a.gsd>current.gsd:a.gsd<current.gsd)) ||
+      (a.gsd===current.gsd&&a.year>current.year));
+    if(!current||betterOrtho||(mode!=='luftbild'&&a.year>current.year))chosen.set(a.key,a);
   }
   return [...chosen.values()];
 }
@@ -58,17 +60,17 @@ export async function discoverPrintAssets(bounds,{mode='karte',scale=25000,signa
   const bbox=stacBbox(bounds).join(',');
   let url=`https://data.geo.admin.ch/api/stac/v1/collections/${encodeURIComponent(product.collection)}/items?bbox=${bbox}&limit=100`;
   let features=[];const visited=new Set();
-  for(let page=0;url&&page<22;page++){
+  for(let page=0;url&&page<250;page++){
     if(signal?.aborted)throw new DOMException('Abgebrochen','AbortError');
     if(visited.has(url))throw new Error('STAC-Paginierung fehlerhaft.');visited.add(url);
     onProgress(`Suche Original-GeoTIFFs (${product.description}), Seite ${page+1} …`);
     const r=await fetch(url,{signal});if(!r.ok)throw new Error(`STAC-Dienst ${product.collection}: HTTP ${r.status}`);
     const j=await r.json();features.push(...(j.features||[]));
-    if(features.length>2200)throw new Error('Zu viele Quellenkacheln; Ausschnitt verkleinern.');
+    if(features.length>20000)throw new Error('Mehr als 20 000 Datenkacheln; Ausschnitt oder Massstab eingrenzen.');
     const next=j.links?.find(v=>v.rel==='next');url=next?new URL(next.href,url).href:null;
   }
-  if(url)throw new Error('STAC-Suche überschreitet 22 Seiten; Ausschnitt verkleinern.');
-  const assets=selectPrintAssets(features,{mode,collection:product.collection});
+  if(url)throw new Error('STAC-Suche überschreitet 250 Seiten; Ausschnitt eingrenzen.');
+  const assets=selectPrintAssets(features,{mode,collection:product.collection,preferMeters: mode==='luftbild'?scale*.0254/508:product.expectedGsd});
   if(!assets.length)throw new Error(`Keine originalen GeoTIFF-Quelldaten für ${product.description} gefunden. Wähle einen anderen Kartenausschnitt oder lade lokale GeoTIFFs.`);
   if(assets.length>limit)throw new Error(`${assets.length} Datenkacheln gefunden (Browsergrenze ${limit}). Ausschnitt verkleinern oder lokal vorbereitete GeoTIFFs verwenden.`);
   return {product,assets};

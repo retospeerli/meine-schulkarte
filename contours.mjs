@@ -1,5 +1,5 @@
 /** Isoline extraction from an LV95-aligned sampled elevation grid. */
-import {toPaper} from './core.mjs';
+import {toPaper} from './core.mjs?v=2.7';
 
 export function computeContours(grid,interval,{maxLevels=350,maxSegments=550000}={}) {
   const {values,nx,ny,step,bounds}=grid;
