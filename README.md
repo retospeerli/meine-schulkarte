@@ -164,7 +164,7 @@ nicht end-to-end ausgeführt werden. Die internen Tests prüfen PDF-Struktur,
 Seitengeometrie, Quellwahl und Simulation von Blöcken.
 
 
-## Version 2.9 – Optionales Höhenlinien-Büchlein
+## Version 3.0 – Optionales Höhenlinien-Büchlein
 
 Im Modus **Höhenlinien** kann die Checkbox **«PDF als Höhenlinien-Büchlein»** aktiviert werden. Der normale PDF-Export erstellt dann ein **mehrseitiges Vektor-PDF**, dessen Seiten aufsteigend nach Höhe sortiert sind. Alle einzelnen Kurven einer Höhenstufe (auch getrennte Hügel/Insellinien) liegen **zusammen auf derselben Seite**; die nächste Höhenstufe erhält die nächste Seite.
 
@@ -179,3 +179,12 @@ Alle Seiten behalten dasselbe DIN-Format, dieselbe Orientierung, dieselbe LV95-K
 - Jede Folgeseite zeigt genau eine Höhenstufe.
 - Auf jeder Folgeseite ist die wegzuschneidende Fläche schraffiert dargestellt.
 - Offene Konturen am Blattrand werden weiterhin als Linien gezeigt; die Schraffur basiert auf geschlossenen Konturen dieser Höhe.
+
+
+## Neu in 3.0
+
+- Das Höhenlinien-Büchlein enthält keinerlei Text mehr.
+- Blatt 1 zeigt alle Höhenlinien zusammen.
+- Alle folgenden Blätter zeigen jeweils nur eine Höhenstufe.
+- Schraffuren, Titel, Seitenzahlen und Fusszeilen wurden vollständig entfernt.
+- Ein Fehler im PDF-Clip wurde korrigiert; die Höhenlinien werden nun tatsächlich gezeichnet.
