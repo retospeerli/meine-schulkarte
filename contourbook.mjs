@@ -1,8 +1,8 @@
-/** Vektorbasiertes Graukarton-Büchlein ohne Text.
- * Seite 1: alle Höhenlinien zusammen.
+/** Vektorbasiertes Graukarton-Büchlein.
+ * Blatt 1: alle Höhenlinien zusammen.
  * Danach: je eine Höhenstufe pro identischer DIN-Seite.
- * Jede Seite enthält ausschliesslich die Linien, damit sie direkt
- * auf Karton geklebt und ausgesägt werden kann.
+ * Jede Seite zeigt immer den Relief-Rand.
+ * Auf den Stufenseiten wird zusätzlich nur die nackte Höhenzahl ausgegeben.
  */
 import {toPaper} from './core.mjs';
 
@@ -13,6 +13,7 @@ const n=x=>{
   if(!Number.isFinite(x))throw new Error('Ungültige PDF-Koordinate.');
   return Number(x.toFixed(5)).toString();
 };
+const pdfText=s=>String(s).normalize('NFKD').replace(/[^\x20-\x7e]/g,'?').replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)');
 
 export function orderedContourLevels(result){
   if(!Array.isArray(result?.levels)||!result.levels.length)throw new Error('Keine Höhenstufen vorhanden.');
@@ -37,6 +38,11 @@ function clipRectCommands(l){
   const y=l.h-l.margin-l.innerH; // lower-left y in mm
   return [`${mmX(x)} ${n(y*P)} ${mmX(l.innerW)} ${mmX(l.innerH)} re W n`];
 }
+function frameCommands(l,{lineMm=.18}={}){
+  const x=l.margin;
+  const y=l.h-l.margin-l.innerH;
+  return ['q',`0 0 0 RG ${n(lineMm*P)} w`,`${mmX(x)} ${n(y*P)} ${mmX(l.innerW)} ${mmX(l.innerH)} re S`,'Q'];
+}
 function pathCommands(path,l){
   const out=[];
   let first=true;
@@ -55,14 +61,21 @@ function drawPaths(paths,l,{strokeMm=.16}={}){
     out.push('S');
   }
   out.push('Q');
-  return out.join('\n')+'\n';
+  return out;
+}
+function numberLabelContent(l,value,{fontSizePt=9}={}){
+  // Höhe klein und unaufdringlich unten links im Rand, ausserhalb des Relief-Rahmens.
+  if(!(l.margin>=4))return [];
+  const x=l.margin+1.2;
+  const y=l.h-2.2;
+  return [`BT /F1 ${n(fontSizePt)} Tf 0 g 1 0 0 1 ${mmX(x)} ${mmYFromTop(l,y)} Tm (${pdfText(String(value))}) Tj ET`];
 }
 function allPaths(levels){return levels.flatMap(level=>level.paths);}
 export function bookletOverviewPageContent(levels,l,{strokeMm=.16}={}){
-  return drawPaths(allPaths(levels),l,{strokeMm});
+  return [...frameCommands(l),...drawPaths(allPaths(levels),l,{strokeMm})].join('\n')+'\n';
 }
 export function bookletLevelPageContent(level,l,{strokeMm=.16}={}){
-  return drawPaths(level.paths,l,{strokeMm});
+  return [...frameCommands(l),...drawPaths(level.paths,l,{strokeMm}),...numberLabelContent(l,level.height)].join('\n')+'\n';
 }
 
 /** Streaming-Vektor-PDF, komplett ohne jsPDF und ohne Seiteninhalt im RAM. */
@@ -95,7 +108,7 @@ export class ContourBookletPdf {
         if(signal?.aborted)throw new DOMException('Abgebrochen.','AbortError');
         const pageId=this.pageObjectId(i),streamId=this.streamObjectId(i);
         await this.objectStart(pageId);
-        await this.write(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n(this.l.w*P)} ${n(this.l.h*P)}] /Contents ${streamId} 0 R >>\n`);
+        await this.write(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n(this.l.w*P)} ${n(this.l.h*P)}] /Resources << /Font << /F1 4 0 R >> >> /Contents ${streamId} 0 R >>\n`);
         await this.objectEnd();
         const content=bytes(i===0
           ? bookletOverviewPageContent(this.levels,this.l,{strokeMm:this.strokeMm})
@@ -107,7 +120,7 @@ export class ContourBookletPdf {
         await this.write('endstream\n');
         await this.objectEnd();
         if(i===0||i%2===0||i===this.pages-1){
-          const label=i===0?'Übersicht':`${this.levels[i-1].height} m`;
+          const label=i===0?'Übersicht':`${this.levels[i-1].height}`;
           this.onProgress(`Höhenlinien-Büchlein: Seite ${i+1} von ${this.pages} (${label}) …`);
           await new Promise(ok=>setTimeout(ok,0));
         }
@@ -123,7 +136,7 @@ export class ContourBookletPdf {
       await this.write('<< /Producer (Schweizer Kartengenerator - ContourBook) >>\n');
       await this.objectEnd();
       await this.objectStart(4);
-      await this.write('<< >>\n');
+      await this.write('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\n');
       await this.objectEnd();
       const maxId=4+2*this.pages,startXref=this.offset;
       await this.write(`xref\n0 ${maxId+1}\n0000000000 65535 f \n`);

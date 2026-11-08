@@ -7,7 +7,7 @@ import {CANTONS,searchRegions,getRegionGeometry,getAdjacentLakeGeometry,fitRegio
 import {createOriginalRasterPdf,colourizeBlock} from './rasterexport.mjs?v=2.7';
 import {wmsGetMapUrl,printedBlockBounds} from './mapservice.mjs?v=2.7';
 import {IncrementalA0Pdf,openLargePdfOutput} from './streamedpdf.mjs?v=2.7';
-import {ContourBookletPdf} from './contourbook.mjs?v=3.0';
+import {ContourBookletPdf} from './contourbook.mjs?v=3.1';
 
 const $=id=>document.getElementById(id);
 const sheet=$('sheet'),canvas=$('preview'),ctx=canvas.getContext('2d');
@@ -414,7 +414,7 @@ async function downloadPdf(){
           });
           const info=await booklet.create(signal);
           if(output.reveal)await output.reveal();
-          status(`Höhenlinien-Büchlein erstellt: ${info.pages} Seiten, Blatt 1 mit allen Höhenlinien, danach je eine Höhenstufe pro Seite – ohne Text und ohne Zusatzelemente, ${l.w} × ${l.h} mm, Massstab 1:${format(l.scale)}. Druck bei 100 %.`, 'success');
+          status(`Höhenlinien-Büchlein erstellt: ${info.pages} Seiten, Blatt 1 mit allen Höhenlinien; danach je eine Höhenstufe pro Seite mit Relief-Rand und Höhenzahl, ${l.w} × ${l.h} mm, Massstab 1:${format(l.scale)}. Druck bei 100 %.`, 'success');
         }catch(e){
           if(booklet)await booklet.abort().catch(()=>{});
           else await output.sink.abort().catch(()=>{});
